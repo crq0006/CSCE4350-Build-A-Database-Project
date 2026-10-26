@@ -28,22 +28,32 @@ while True:
     command = input()
     parts = command.split()
 
-    if command.startswith("SET"):
+    
+    if command == "EXIT":
+        print("Exiting")
+        exit()
+    if command.startswith("SET"): #only updates in-memory database, should set up db file l8r, also add error handling for invalid syntax
         key = parts[1]
         value = parts[2]
         SET(key, value)
-    if command.startswith("GET"):
+    if command.startswith("GET"):  #add error handling for invalid syntax
         key = parts[1]
         value = GET(key)
         if value is not None:
             print(value)
         else:
             print("NULL")
-
-    # first record (for debugging)
-    print(database[0].key)
-    print(database[0].value)
-
-    if command == "EXIT":
-        print("Exiting")
-        exit()
+    if command.startswith("DELETE"): #add error handling for invalid syntax
+        key = parts[1]
+        for record in database:
+            if record.key == key:
+                database.remove(record)
+                break
+    if command.startswith("EXISTS"): #add error handling for invalid syntax
+        key = parts[1]
+        exists = False
+        for record in database:
+            if record.key == key:
+                exists = True
+                break
+        print("TRUE" if exists else "FALSE")
