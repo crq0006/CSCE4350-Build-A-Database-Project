@@ -60,6 +60,7 @@ def GET(key):
             return record.value
     return None
 
+#DELETE command
 def DELETE(key):
     write_to_database("DELETE", key)
     for record in database:
@@ -68,11 +69,51 @@ def DELETE(key):
             write_to_database("DELETE", key)
             return
 
+#EXISTS command
 def EXISTS(key):
     for record in database:
         if record.key == key:
             return True
     return False
+
+#MSET command
+def MSET(pairs):
+    for i in range(0, len(pairs), 2):
+        key = pairs[i]
+        value = pairs[i + 1]
+        SET(key, value)
+
+#MGET command
+def MGET(keys):
+    values = []
+    for key in keys:
+        value = GET(key)
+        values.append(value if value is not None else "NULL")
+    return values
+
+#INCR command
+def INCR(key):
+    value = GET(key)
+    if value is None:
+        value = 0
+    try:
+        value = int(value) + 1
+    except ValueError:
+        return None
+    SET(key, str(value))
+    return value
+
+#DECR command
+def DECR(key):
+    value = GET(key)
+    if value is None:
+        value = 0
+    try:
+        value = int(value) - 1
+    except ValueError:
+        return None
+    SET(key, str(value))
+    return value
 
 read_database()
 
@@ -102,6 +143,47 @@ while True:
         key = parts[1]
         DELETE(key)
 
-    if command.startswith("EXISTS"): #add error handling for invalid syntax
+    if command.startswith("MSET"):
+        pairs = parts[1:]
+        if len(pairs) > 0 and len(pairs) % 2 == 0:
+            MSET(pairs)
+        else:
+            print("ERROR")
+
+    if command.startswith("MGET"):
+        keys = parts[1:]
+        values = MGET(keys)
+        for value in values:
+            print(value)
+    
+    if command.startswith("EXISTS"):
         key = parts[1]
         print("TRUE" if EXISTS(key) else "FALSE")
+
+    if command.startswith("INCR"):
+        if parts[0] == "INCR":
+            if len(parts) != 2:
+                print("ERROR")
+                continue
+
+            key = parts[1]
+            value = INCR(key)
+
+            if value is not None:
+                print(value)
+            else:
+                print("ERROR")
+
+    if command.startswith("DECR"):
+        if parts[0] == "DECR":
+            if len(parts) != 2:
+                print("ERROR")
+                continue
+
+            key = parts[1]
+            value = DECR(key)
+
+            if value is not None:
+                print(value)
+            else:
+                print("ERROR")
