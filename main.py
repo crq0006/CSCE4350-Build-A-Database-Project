@@ -2,21 +2,29 @@
 
 #class for record keeping
 from time import time
+import copy
 
+transaction_active = False
+transaction_backup = None
+transaction_log = []
 
 class Record:
     def __init__(self, key, value):
         self.key = key
         self.value = value
         self.expires_at = None
+        self.hash_data = None
 
 #list to store all records in the database
 database = []
 
 #add to db file
 def write_to_database(command, key, value=""):
-    with open("data.db", "a") as file:
-        file.write(f"{command} {key} {value}\n")
+    if transaction_active:
+        transaction_log.append((command, key, value))
+    else:
+        with open("data.db", "a") as file:
+            file.write(f"{command} {key} {value}\n")
 
 #update memory function for the in-memory database
 def update_memory(key, value):
@@ -30,6 +38,27 @@ def update_memory(key, value):
 #helper function for checking if a record has expired
 def is_expired(record):
     return record.expires_at is not None and record.expires_at <= time()
+
+#HSET helper function for updating hash data in memory
+# Helper function for updating hash data in memory
+def update_hash_memory(key, field, value):
+    for record in database:
+        if record.key == key:
+            if record.hash_data is None:
+                return False
+
+            for i in range(len(record.hash_data)):
+                if record.hash_data[i][0] == field:
+                    record.hash_data[i] = (field, value)
+                    return True
+
+            record.hash_data.append((field, value))
+            return True
+
+    record = Record(key, None)
+    record.hash_data = [(field, value)]
+    database.append(record)
+    return True
 
 #function to read database file at startup for database list
 def read_database():
@@ -56,7 +85,11 @@ def read_database():
                         if record.key == key:
                             record.expires_at = expires_at
                             break
-                
+                elif command == "HSET":
+                    field = parts[2]
+                    value = parts[3]
+                    update_hash_memory(key, field, value)
+
     except FileNotFoundError:
         pass
 
@@ -171,6 +204,80 @@ def TTL(key):
 
     return -2
 
+#BEGIN command
+def BEGIN():
+    global transaction_active, transaction_backup, transaction_log
+
+    if transaction_active:
+        return False
+
+    transaction_backup = copy.deepcopy(database)
+    transaction_log = []
+    transaction_active = True
+
+    return True
+
+#COMMIT command
+def COMMIT():
+    global transaction_active, transaction_backup, transaction_log
+
+    if not transaction_active:
+        return False
+
+    with open("data.db", "a") as file:
+        for command, key, value in transaction_log:
+            file.write(f"{command} {key} {value}\n")
+
+    transaction_active = False
+    transaction_backup = None
+    transaction_log = []
+
+    return True
+
+#ABORT command
+def ABORT():
+    global transaction_active, transaction_backup, transaction_log
+
+    if not transaction_active:
+        return False
+
+    database.clear()
+    database.extend(transaction_backup)
+
+    transaction_active = False
+    transaction_backup = None
+    transaction_log = []
+
+    return True
+
+#HSET command
+def HSET(key, field, value):
+    success = update_hash_memory(key, field, value)
+
+    if success:
+        write_to_database("HSET", key, f"{field} {value}")
+
+    return success
+
+def HGET(key, field):
+    for record in database:
+        if record.key == key:
+            if record.hash_data is None:
+                return None
+            for f, v in record.hash_data:
+                if f == field:
+                    return v
+            return None
+    return None
+
+def HGETALL(key):
+    for record in database:
+        if record.key == key:
+            if record.hash_data is None:
+                return []
+            return record.hash_data
+    return []
+
 read_database()
 
 while True:
@@ -219,71 +326,115 @@ while True:
         print("TRUE" if EXISTS(key) else "FALSE")
 
     if parts[0] == "INCR":
-        if parts[0] == "INCR":
-            if len(parts) != 2:
-                print("ERROR")
-                continue
+        if len(parts) != 2:
+            print("ERROR")
+            continue
 
-            key = parts[1]
-            value = INCR(key)
+        key = parts[1]
+        value = INCR(key)
 
-            if value is not None:
-                print(value)
-            else:
-                print("ERROR")
+        if value is not None:
+            print(value)
+        else:
+            print("ERROR")
 
     if parts[0] == "DECR":
-        if parts[0] == "DECR":
-            if len(parts) != 2:
-                print("ERROR")
-                continue
+        if len(parts) != 2:
+            print("ERROR")
+            continue
 
-            key = parts[1]
-            value = DECR(key)
+        key = parts[1]
+        value = DECR(key)
 
-            if value is not None:
-                print(value)
-            else:
-                print("ERROR")
+        if value is not None:
+            print(value)
+        else:
+            print("ERROR")
 
     if parts[0] == "RANGE":
-        if parts[0] == "RANGE":
-            if len(parts) != 3:
-                print("ERROR")
-                continue
+        if len(parts) != 3:
+            print("ERROR")
+            continue
 
-            start = parts[1]
-            end = parts[2]
-            values = RANGE(start, end)
-            for key, value in values:
-                print(key, value)
+        start = parts[1]
+        end = parts[2]
+        values = RANGE(start, end)
+        for key, value in values:
+            print(key, value)
 
     if parts[0] == "EXPIRE":
-        if parts[0] == "EXPIRE":
-            if len(parts) != 3:
+        if len(parts) != 3:
+            print("ERROR")
+            continue
+
+        key = parts[1]
+        try:
+            seconds = int(parts[2])
+
+            if seconds < 0:
                 print("ERROR")
                 continue
 
-            key = parts[1]
-            try:
-                seconds = int(parts[2])
+        except ValueError:
+            print("ERROR")
+            continue
 
-                if seconds < 0:
-                    print("ERROR")
-                    continue
+        success = EXPIRE(key, seconds)
+        print("TRUE" if success else "FALSE")
 
-            except ValueError:
-                print("ERROR")
-                continue
-
-            success = EXPIRE(key, seconds)
-            print("TRUE" if success else "FALSE")
 
     if parts[0] == "TTL":
-        if parts[0] == "TTL":
-            if len(parts) != 2:
-                print("ERROR")
-                continue
+        if len(parts) != 2:
+            print("ERROR")
+            continue
 
-            key = parts[1]
-            print(TTL(key))
+        key = parts[1]
+        print(TTL(key))
+            
+    if parts[0] == "BEGIN":
+        success = BEGIN()
+        print("TRUE" if success else "ERROR")
+
+    if parts[0] == "COMMIT":
+        success = COMMIT()
+        print("TRUE" if success else "ERROR")
+
+    if parts[0] == "ABORT":
+        success = ABORT()
+        print("TRUE" if success else "ERROR")
+
+    if parts[0] == "HSET":
+        if len(parts) != 4:
+            print("NULL")
+            continue
+
+        key = parts[1]
+        field = parts[2]
+        value = parts[3]
+        success = HSET(key, field, value)
+        print("TRUE" if success else "NULL")
+
+    if parts[0] == "HGET":
+        if len(parts) != 3:
+            print("NULL")
+            continue
+
+        key = parts[1]
+        field = parts[2]
+        value = HGET(key, field)
+        if value is not None:
+            print(value)
+        else:
+            print("NULL")
+
+    if parts[0] == "HGETALL":
+        if len(parts) != 2:
+            print("NULL")
+            continue
+
+        key = parts[1]
+        fields = HGETALL(key)
+        for field, value in fields:
+            print(field, value)
+
+
