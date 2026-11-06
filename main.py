@@ -14,6 +14,7 @@ class Record:
         self.value = value
         self.expires_at = None
         self.hash_data = None
+        self.list_data = None
 
 #list to store all records in the database
 database = []
@@ -40,7 +41,6 @@ def is_expired(record):
     return record.expires_at is not None and record.expires_at <= time()
 
 #HSET helper function for updating hash data in memory
-# Helper function for updating hash data in memory
 def update_hash_memory(key, field, value):
     for record in database:
         if record.key == key:
@@ -60,6 +60,26 @@ def update_hash_memory(key, field, value):
     database.append(record)
     return True
 
+#Helper function for updating list data in memory
+# Helper function for updating list data in memory
+def update_list_memory(key, value, left=True):
+    for record in database:
+        if record.key == key:
+            if record.list_data is None:
+                return False
+
+            if left:
+                record.list_data.insert(0, value)
+            else:
+                record.list_data.append(value)
+
+            return True
+
+    record = Record(key, None)
+    record.list_data = [value]
+    database.append(record)
+    return True
+
 #function to read database file at startup for database list
 def read_database():
     try:
@@ -67,6 +87,11 @@ def read_database():
             for line in file:
                 parts = line.strip().split()
                 command = parts[0]
+                
+                if command == "FLUSHDB":
+                    database.clear()
+                    continue
+
                 key = parts[1]
 
                 if command == "SET":
@@ -89,6 +114,15 @@ def read_database():
                     field = parts[2]
                     value = parts[3]
                     update_hash_memory(key, field, value)
+                elif command == "LPUSH":
+                    value = parts[2]
+                    update_list_memory(key, value, True)
+
+                elif command == "RPUSH":
+                    value = parts[2]
+                    update_list_memory(key, value, False)
+                elif command == "FLUSHDB":
+                    database.clear()
 
     except FileNotFoundError:
         pass
@@ -278,6 +312,42 @@ def HGETALL(key):
             return record.hash_data
     return []
 
+def LPUSH(key, value):
+    success = update_list_memory(key, value, True)
+
+    if success:
+        write_to_database("LPUSH", key, value)
+
+    return success
+
+def RPUSH(key, value):
+    success = update_list_memory(key, value, False)
+
+    if success:
+        write_to_database("RPUSH", key, value)
+
+    return success
+
+def LRANGE(key, start, end):
+    for record in database:
+        if record.key == key:
+            if record.list_data is None:
+                return []
+            data = record.list_data
+            size = len(data)
+
+            start = max(0, start if start >= 0 else size + start)
+            end = min(size - 1, end if end >= 0 else size + end)
+
+            return data[start:end + 1]
+        
+    return []
+
+def FLUSHDB():
+    write_to_database("FLUSHDB", "", "")
+    database.clear()
+    return True
+
 read_database()
 
 while True:
@@ -436,5 +506,50 @@ while True:
         fields = HGETALL(key)
         for field, value in fields:
             print(field, value)
+
+    if parts[0] == "LPUSH":
+        if len(parts) != 3:
+            print("ERROR")
+            continue
+
+        key = parts[1]
+        value = parts[2]
+
+        success = LPUSH(key, value)
+        print("TRUE" if success else "ERROR")
+
+    if parts[0] == "RPUSH":
+        if len(parts) != 3:
+            print("ERROR")
+            continue
+
+        key = parts[1]
+        value = parts[2]
+
+        success = RPUSH(key, value)
+        print("TRUE" if success else "ERROR")
+
+    if parts[0] == "LRANGE":
+        if len(parts) != 4:
+            print("ERROR")
+            continue
+
+        key = parts[1]
+        try:
+            start = int(parts[2])
+            end = int(parts[3])
+        except ValueError:
+            print("ERROR")
+            continue
+
+        values = LRANGE(key, start, end)
+        for value in values:
+            print(value)
+
+    if parts[0] == "FLUSHDB":
+        success = FLUSHDB()
+        print("TRUE" if success else "ERROR")
+
+    
 
 
